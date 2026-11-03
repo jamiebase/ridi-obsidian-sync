@@ -16,7 +16,6 @@ function merge(original,data){
  return {text:output,added:added.length,skipped:data.items.length-added.length};
 }
 
-
 const http=require('node:http');
 const crypto=require('node:crypto');
 function startBridge(onData,options={}){return new Promise((resolve,reject)=>{
@@ -33,12 +32,50 @@ function startBridge(onData,options={}){return new Promise((resolve,reject)=>{
  function close(){if(!closed){closed=true;clearTimeout(timer);server.close();}}
  server.once('error',reject);server.listen(options.port??0,'127.0.0.1',()=>{timer=setTimeout(close,options.timeoutMs??120000);resolve({token,port:server.address().port,close,isClosed:()=>closed});});
 });}
-
-
-function getBookId(text){const ids=new Set([...text.matchAll(/<!-- ridi:(\d+):annotation_\d+ -->/g)].map(m=>m[1]));if(ids.size===0)throw Error('노트에서 리디 책 ID를 찾지 못했습니다. 먼저 기존 방식으로 한 번 가져오세요.');if(ids.size!==1)throw Error('노트에 리디 책 ID가 여러 개 있습니다. 자동 가져오기를 중단합니다.');return [...ids][0];}
-
-
-const {Plugin,Modal,Notice,MarkdownView,TFile}=require('obsidian');
+function getBookId(text, frontmatter = {}, required = true) {
+ const markers = new Set([...text.matchAll(/<!-- ridi:(\d+):annotation_\d+ -->/g)].map(m => m[1]));
+ if (markers.size > 1) throw Error('노트에 리디 책 ID가 여러 개 있습니다. 자동 가져오기를 중단합니다.');
+ let property;
+ if (Object.prototype.hasOwnProperty.call(frontmatter, 'ridi_book_id')) {
+  const value = frontmatter.ridi_book_id;
+  if (!((typeof value === 'string' && /^\d+$/.test(value)) || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0))) throw Error('ridi_book_id 속성이 올바르지 않습니다.');
+  property = String(value);
+ }
+ const marker = [...markers][0];
+ if (property && marker && property !== marker) throw Error('ridi_book_id 속성과 밑줄의 책 ID가 다릅니다.');
+ const id = property || marker;
+ if (!id && required) throw Error('노트에서 리디 책 ID를 찾지 못했습니다. 먼저 기존 방식으로 한 번 가져오세요.');
+ return id || null;
+}
+function verifyBookId(text, frontmatter, incoming) {
+ const id = getBookId(text, frontmatter, false);
+ if (id && id !== String(incoming)) throw Error('가져온 책 ID와 노트의 책 ID가 다릅니다.');
+ return id;
+}
+async function applyImport(app, file, snapshot, result, incoming, readFrontmatter) {
+ let needsProperty = false;
+ await app.vault.process(file, current => {
+  if (current !== snapshot) throw Error('미리보기 이후 노트가 변경되었습니다. 다시 확인하세요.');
+  const frontmatter = readFrontmatter(current);
+  verifyBookId(current, frontmatter, incoming);
+  needsProperty = !Object.prototype.hasOwnProperty.call(frontmatter, 'ridi_book_id');
+  return result.text;
+ });
+ if (needsProperty) {
+  try {
+   await app.fileManager.processFrontMatter(file, frontmatter => {
+    verifyBookId(snapshot, frontmatter, incoming);
+    if (!Object.prototype.hasOwnProperty.call(frontmatter, 'ridi_book_id')) frontmatter.ridi_book_id = String(incoming);
+   });
+  } catch (error) {
+   const prefix = result.added ? '밑줄은 저장했지만 책 ID 속성을 저장하지 못했습니다.' : '책 ID 속성을 저장하지 못했습니다.';
+   throw Error(prefix + ' 다시 확인해 주세요. ' + error.message);
+  }
+ }
+ return {propertyAdded: needsProperty};
+}
+const {Plugin,Modal,Notice,MarkdownView,TFile,getFrontMatterInfo,parseYaml}=require('obsidian');
+function readFrontmatter(text){const info=getFrontMatterInfo(text);if(!info.exists){if(/^(?:\uFEFF)?---[ \t]*\r?\n/.test(text))throw Error('노트의 속성 영역이 올바르지 않습니다.');return {};}const value=parseYaml(info.frontmatter);if(value==null)return {};if(typeof value!=='object'||Array.isArray(value))throw Error('노트의 속성 영역이 올바르지 않습니다.');return value;}
 class ImportModal extends Modal {
  constructor(app,file,initialData){super(app);this.file=file;this.initialData=initialData;this.snapshot=null;this.result=null;this.busy=false;this.sequence=0;}
  onOpen(){
@@ -48,14 +85,14 @@ class ImportModal extends Modal {
   const message=root.createEl('p');const pre=root.createEl('pre');pre.style.whiteSpace='pre-wrap';pre.style.maxHeight='320px';pre.style.overflow='auto';
   const apply=root.createEl('button',{text:'노트에 반영'});apply.disabled=true;
   const prepare=async(data)=>{const seq=++this.sequence;apply.disabled=true;this.result=null;pre.textContent='';message.textContent='';try{
-   const snapshot=await this.app.vault.read(this.file);const result=merge(snapshot,data);if(seq!==this.sequence)return;
-   this.snapshot=snapshot;this.result=result;message.textContent=`리디 책: ${data.title} · 새 항목 ${result.added}개 · 기존 항목 ${result.skipped}개. 대상 노트가 맞는지 확인하세요.`;
-   pre.textContent=result.text;apply.disabled=result.added===0;
+   const snapshot=await this.app.vault.read(this.file);const frontmatter=readFrontmatter(snapshot);const result=merge(snapshot,data);verifyBookId(snapshot,frontmatter,data.bookId);const needsProperty=!Object.prototype.hasOwnProperty.call(frontmatter,'ridi_book_id');if(seq!==this.sequence)return;
+   this.snapshot=snapshot;this.result=result;this.bookId=String(data.bookId);message.textContent=`리디 책: ${data.title} · 새 항목 ${result.added}개 · 기존 항목 ${result.skipped}개${needsProperty?' · 책 ID 속성 추가':''}. 대상 노트가 맞는지 확인하세요.`;
+   pre.textContent=result.text;apply.disabled=result.added===0&&!needsProperty;
   }catch(e){if(seq===this.sequence)message.textContent='미리보기 실패: '+e.message;}};
   input.addEventListener('change',async()=>{const seq=++this.sequence;apply.disabled=true;this.result=null;pre.textContent='';message.textContent='';try{const f=input.files&&input.files[0];if(!f)return;if(f.size>10485760)throw Error('JSON 파일이 너무 큽니다.');const data=JSON.parse(await f.text());if(seq===this.sequence)await prepare(data);}catch(e){if(seq===this.sequence)message.textContent='미리보기 실패: '+e.message;}});
   apply.addEventListener('click',async()=>{if(this.busy||!this.result)return;this.busy=true;apply.disabled=true;try{
-   await this.app.vault.process(this.file,current=>{if(current!==this.snapshot)throw Error('미리보기 이후 노트가 변경되었습니다. 다시 확인하세요.');return this.result.text;});
-   new Notice(`리디 독서노트 ${this.result.added}개를 추가했습니다.`);this.close();
+   const outcome=await applyImport(this.app,this.file,this.snapshot,this.result,this.bookId,readFrontmatter);
+   new Notice(`리디 독서노트 ${this.result.added}개를 추가했습니다.${outcome.propertyAdded?' 책 ID 속성을 저장했습니다.':''}`);this.close();
   }catch(e){message.textContent='저장 실패: '+e.message;}finally{this.busy=false;}});
   if(this.initialData)prepare(this.initialData);
  }
@@ -75,7 +112,7 @@ class ConnectModal extends Modal {
 module.exports=class RidiImportPlugin extends Plugin {
  async onload(){const settings=await this.loadData()||{};this.pairToken=typeof settings.pairToken==='string'&&/^[0-9a-f]{48}$/.test(settings.pairToken)?settings.pairToken:crypto.randomBytes(24).toString('hex');if(settings.pairToken!==this.pairToken)await this.saveData({...settings,pairToken:this.pairToken});this.activeBridges=new Set();this.registerEvent(this.app.workspace.on('ridi-bridge-received',(file,data)=>{if(this.connectModal)this.connectModal.close();for(const b of this.activeBridges)b.close();this.activeBridges.clear();new ImportModal(this.app,file,data).open();}));
   const active=()=>{const view=this.app.workspace.getActiveViewOfType(MarkdownView);const file=view&&view.file;if(!(file instanceof TFile)){new Notice('대상 책 노트를 먼저 열어 주세요.');return null;}return file;};
-  this.addCommand({id:'automatic-ridi-notes',name:'현재 책의 리디 독서노트 자동 가져오기',callback:async()=>{const file=active();if(!file)return;try{const id=getBookId(await this.app.vault.read(file));if(this.connectModal)this.connectModal.close();this.connectModal=new ConnectModal(this.app,file,this,id);this.connectModal.open();}catch(e){new Notice(e.message);}}});
+  this.addCommand({id:'automatic-ridi-notes',name:'현재 책의 리디 독서노트 자동 가져오기',callback:async()=>{const file=active();if(!file)return;try{const text=await this.app.vault.read(file);const id=getBookId(text,readFrontmatter(text));if(this.connectModal)this.connectModal.close();this.connectModal=new ConnectModal(this.app,file,this,id);this.connectModal.open();}catch(e){new Notice(e.message);}}});
   this.addCommand({id:'import-ridi-notes',name:'리디 독서노트 JSON 가져오기',callback:()=>{const file=active();if(file)new ImportModal(this.app,file).open();}});
   this.addCommand({id:'connect-ridi-notes',name:'리디 확장 프로그램에서 가져오기',callback:()=>{const file=active();if(file){if(this.connectModal)this.connectModal.close();this.connectModal=new ConnectModal(this.app,file,this);this.connectModal.open();}}});
  }

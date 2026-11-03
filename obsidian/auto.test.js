@@ -3,3 +3,15 @@ assert.equal(getBookId('<!-- ridi:123:annotation_1 -->\n<!-- ridi:123:annotation
 assert.throws(()=>getBookId('없음'),/찾지 못/);
 assert.throws(()=>getBookId('<!-- ridi:123:annotation_1 -->\n<!-- ridi:456:annotation_2 -->'),/여러/);
 console.log('책 ID 식별 검사 통과');
+assert.equal(getBookId('',{ridi_book_id:'123'}),'123');
+assert.equal(getBookId('<!-- ridi:123:annotation_1 -->',{ridi_book_id:'123'}),'123');
+assert.throws(()=>getBookId('<!-- ridi:456:annotation_1 -->',{ridi_book_id:'123'}),/다릅니다/);
+assert.throws(()=>getBookId('<!-- ridi:123:annotation_1 -->',{ridi_book_id:'invalid'}),/올바르지/);
+assert.throws(()=>getBookId('',{ridi_book_id:9007199254740992}),/올바르지/);
+console.log('속성 우선 및 충돌 검사 통과');
+const {verifyBookId}=require('./book');
+assert.equal(verifyBookId('',{},'123'),null);
+assert.equal(verifyBookId('<!-- ridi:123:annotation_1 -->',{},'123'),'123');
+assert.throws(()=>verifyBookId('',{ridi_book_id:'123'},'456'),/다릅니다/);
+assert.throws(()=>verifyBookId('<!-- ridi:123:annotation_1 -->',{ridi_book_id:'456'},'456'),/다릅니다/);
+console.log('가져오는 책과 노트 연결 검사 통과');

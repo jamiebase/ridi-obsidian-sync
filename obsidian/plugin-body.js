@@ -1,4 +1,5 @@
-const {Plugin,Modal,Notice,MarkdownView,TFile}=require('obsidian');
+const {Plugin,Modal,Notice,MarkdownView,TFile,getFrontMatterInfo,parseYaml}=require('obsidian');
+function readFrontmatter(text){const info=getFrontMatterInfo(text);if(!info.exists){if(/^(?:\uFEFF)?---[ \t]*\r?\n/.test(text))throw Error('노트의 속성 영역이 올바르지 않습니다.');return {};}const value=parseYaml(info.frontmatter);if(value==null)return {};if(typeof value!=='object'||Array.isArray(value))throw Error('노트의 속성 영역이 올바르지 않습니다.');return value;}
 class ImportModal extends Modal {
  constructor(app,file,initialData){super(app);this.file=file;this.initialData=initialData;this.snapshot=null;this.result=null;this.busy=false;this.sequence=0;}
  onOpen(){
@@ -8,14 +9,14 @@ class ImportModal extends Modal {
   const message=root.createEl('p');const pre=root.createEl('pre');pre.style.whiteSpace='pre-wrap';pre.style.maxHeight='320px';pre.style.overflow='auto';
   const apply=root.createEl('button',{text:'노트에 반영'});apply.disabled=true;
   const prepare=async(data)=>{const seq=++this.sequence;apply.disabled=true;this.result=null;pre.textContent='';message.textContent='';try{
-   const snapshot=await this.app.vault.read(this.file);const result=merge(snapshot,data);if(seq!==this.sequence)return;
-   this.snapshot=snapshot;this.result=result;message.textContent=`리디 책: ${data.title} · 새 항목 ${result.added}개 · 기존 항목 ${result.skipped}개. 대상 노트가 맞는지 확인하세요.`;
-   pre.textContent=result.text;apply.disabled=result.added===0;
+   const snapshot=await this.app.vault.read(this.file);const frontmatter=readFrontmatter(snapshot);const result=merge(snapshot,data);verifyBookId(snapshot,frontmatter,data.bookId);const needsProperty=!Object.prototype.hasOwnProperty.call(frontmatter,'ridi_book_id');if(seq!==this.sequence)return;
+   this.snapshot=snapshot;this.result=result;this.bookId=String(data.bookId);message.textContent=`리디 책: ${data.title} · 새 항목 ${result.added}개 · 기존 항목 ${result.skipped}개${needsProperty?' · 책 ID 속성 추가':''}. 대상 노트가 맞는지 확인하세요.`;
+   pre.textContent=result.text;apply.disabled=result.added===0&&!needsProperty;
   }catch(e){if(seq===this.sequence)message.textContent='미리보기 실패: '+e.message;}};
   input.addEventListener('change',async()=>{const seq=++this.sequence;apply.disabled=true;this.result=null;pre.textContent='';message.textContent='';try{const f=input.files&&input.files[0];if(!f)return;if(f.size>10485760)throw Error('JSON 파일이 너무 큽니다.');const data=JSON.parse(await f.text());if(seq===this.sequence)await prepare(data);}catch(e){if(seq===this.sequence)message.textContent='미리보기 실패: '+e.message;}});
   apply.addEventListener('click',async()=>{if(this.busy||!this.result)return;this.busy=true;apply.disabled=true;try{
-   await this.app.vault.process(this.file,current=>{if(current!==this.snapshot)throw Error('미리보기 이후 노트가 변경되었습니다. 다시 확인하세요.');return this.result.text;});
-   new Notice(`리디 독서노트 ${this.result.added}개를 추가했습니다.`);this.close();
+   const outcome=await applyImport(this.app,this.file,this.snapshot,this.result,this.bookId,readFrontmatter);
+   new Notice(`리디 독서노트 ${this.result.added}개를 추가했습니다.${outcome.propertyAdded?' 책 ID 속성을 저장했습니다.':''}`);this.close();
   }catch(e){message.textContent='저장 실패: '+e.message;}finally{this.busy=false;}});
   if(this.initialData)prepare(this.initialData);
  }
@@ -35,7 +36,7 @@ class ConnectModal extends Modal {
 module.exports=class RidiImportPlugin extends Plugin {
  async onload(){const settings=await this.loadData()||{};this.pairToken=typeof settings.pairToken==='string'&&/^[0-9a-f]{48}$/.test(settings.pairToken)?settings.pairToken:crypto.randomBytes(24).toString('hex');if(settings.pairToken!==this.pairToken)await this.saveData({...settings,pairToken:this.pairToken});this.activeBridges=new Set();this.registerEvent(this.app.workspace.on('ridi-bridge-received',(file,data)=>{if(this.connectModal)this.connectModal.close();for(const b of this.activeBridges)b.close();this.activeBridges.clear();new ImportModal(this.app,file,data).open();}));
   const active=()=>{const view=this.app.workspace.getActiveViewOfType(MarkdownView);const file=view&&view.file;if(!(file instanceof TFile)){new Notice('대상 책 노트를 먼저 열어 주세요.');return null;}return file;};
-  this.addCommand({id:'automatic-ridi-notes',name:'현재 책의 리디 독서노트 자동 가져오기',callback:async()=>{const file=active();if(!file)return;try{const id=getBookId(await this.app.vault.read(file));if(this.connectModal)this.connectModal.close();this.connectModal=new ConnectModal(this.app,file,this,id);this.connectModal.open();}catch(e){new Notice(e.message);}}});
+  this.addCommand({id:'automatic-ridi-notes',name:'현재 책의 리디 독서노트 자동 가져오기',callback:async()=>{const file=active();if(!file)return;try{const text=await this.app.vault.read(file);const id=getBookId(text,readFrontmatter(text));if(this.connectModal)this.connectModal.close();this.connectModal=new ConnectModal(this.app,file,this,id);this.connectModal.open();}catch(e){new Notice(e.message);}}});
   this.addCommand({id:'import-ridi-notes',name:'리디 독서노트 JSON 가져오기',callback:()=>{const file=active();if(file)new ImportModal(this.app,file).open();}});
   this.addCommand({id:'connect-ridi-notes',name:'리디 확장 프로그램에서 가져오기',callback:()=>{const file=active();if(file){if(this.connectModal)this.connectModal.close();this.connectModal=new ConnectModal(this.app,file,this);this.connectModal.open();}}});
  }
