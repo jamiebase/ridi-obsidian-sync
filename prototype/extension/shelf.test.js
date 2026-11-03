@@ -1,0 +1,3 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+function run(total,search=''){const links=[{innerText:`독서노트 책장 ${total}`}],book=id=>({href:`https://ridibooks.com/reading-note/detail/${id}`,innerText:`책 ${id}`,closest:()=>true});const document={querySelectorAll:s=>s.includes('/shelf')?links:[book('1'),book('2')],querySelector:()=>({value:search})};return vm.runInNewContext(fs.readFileSync(__dirname+'/shelf.js','utf8'),{document,URL,location:{origin:'https://ridibooks.com'},Set,Error});}
+assert.equal(run(2).length,2);assert.throws(()=>run(3),/전체/);assert.throws(()=>run(2,'검색'),/검색어/);console.log('책장 목록과 전체 개수 검증 통과');
