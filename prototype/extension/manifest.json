@@ -1,8 +1,17 @@
 {
   "manifest_version": 3,
   "name": "리디 독서노트 수집 프로토타입",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "열려 있는 책의 독서노트를 로컬 JSON으로 내보냅니다.",
-  "permissions": ["activeTab", "scripting"],
-  "action": { "default_title": "독서노트 수집", "default_popup": "popup.html" }
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_title": "독서노트 수집",
+    "default_popup": "popup.html"
+  },
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ]
 }

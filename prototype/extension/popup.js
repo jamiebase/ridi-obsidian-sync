@@ -1,4 +1,4 @@
-document.getElementById("go").addEventListener("click", async () => {
+async function collect(send) {
   const status = document.getElementById("status");
   try {
     const [tab] = await chrome.tabs.query({
@@ -81,6 +81,15 @@ document.getElementById("go").addEventListener("click", async () => {
       },
     });
     const data = result.result;
+    if (send) {
+      const code = document.getElementById("code").value.trim();
+      if (!/^[0-9]{1,5}:[0-9a-f]{48}$/.test(code)) throw Error("옵시디언에서 받은 연결 코드를 입력하세요.");
+      const [port, token] = code.split(":");
+      const response = await fetch(`http://127.0.0.1:${port}/import`, {method:"POST",headers:{"Content-Type":"application/json","X-Ridi-Token":token},body:JSON.stringify(data)});
+      if (!response.ok) throw Error("전송이 거부됐습니다. 옵시디언에서 새 연결 코드를 받아 주세요.");
+      status.textContent = `${data.title}: ${data.items.length}개를 보냈습니다. 옵시디언 미리보기를 확인하세요.`;
+      return;
+    }
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
     });
@@ -94,4 +103,6 @@ document.getElementById("go").addEventListener("click", async () => {
   } catch (e) {
     status.textContent = "수집 실패: " + e.message;
   }
-});
+}
+document.getElementById('go').addEventListener('click',()=>collect(true));
+document.getElementById('download').addEventListener('click',()=>collect(false));
