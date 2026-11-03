@@ -1,0 +1,3 @@
+const assert=require('node:assert/strict');const {startBridge}=require('./bridge');
+(async()=>{let port=0;const token='a'.repeat(48);for(const bookId of ['123','456']){let received;const b=await startBridge(data=>{received=data;return true},{port,token,bookId,timeoutMs:3000});port=b.port;const headers={'x-ridi-token':token,'content-type':'application/json'};const status=await fetch(`http://127.0.0.1:${port}/status`,{headers});assert.equal((await status.json()).bookId,bookId);const response=await fetch(`http://127.0.0.1:${port}/import`,{method:'POST',headers,body:JSON.stringify({bookId})});assert.equal(response.status,200);assert.equal(received.bookId,bookId);}
+ console.log('연속된 책 수집 연결 검사 통과');})().catch(e=>{console.error(e);process.exitCode=1});

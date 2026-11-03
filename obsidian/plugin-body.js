@@ -36,9 +36,10 @@ class ConnectModal extends Modal {
 module.exports=class RidiImportPlugin extends Plugin {
  async onload(){const settings=await this.loadData()||{};this.pairToken=typeof settings.pairToken==='string'&&/^[0-9a-f]{48}$/.test(settings.pairToken)?settings.pairToken:crypto.randomBytes(24).toString('hex');if(settings.pairToken!==this.pairToken)await this.saveData({...settings,pairToken:this.pairToken});this.activeBridges=new Set();this.registerEvent(this.app.workspace.on('ridi-bridge-received',(file,data)=>{if(this.connectModal)this.connectModal.close();for(const b of this.activeBridges)b.close();this.activeBridges.clear();new ImportModal(this.app,file,data).open();}));
   const active=()=>{const view=this.app.workspace.getActiveViewOfType(MarkdownView);const file=view&&view.file;if(!(file instanceof TFile)){new Notice('대상 책 노트를 먼저 열어 주세요.');return null;}return file;};
+  this.addCommand({id:'batch-ridi-notes',name:'연결된 모든 책의 리디 독서노트 가져오기',callback:()=>{if(this.batchModal){new Notice('이미 일괄 가져오기가 진행 중입니다.');return;}if(this.connectModal)this.connectModal.close();this.batchModal=new BatchModal(this.app,this);this.batchModal.open();}});
   this.addCommand({id:'automatic-ridi-notes',name:'현재 책의 리디 독서노트 자동 가져오기',callback:async()=>{const file=active();if(!file)return;try{const text=await this.app.vault.read(file);const id=getBookId(text,readFrontmatter(text));if(this.connectModal)this.connectModal.close();this.connectModal=new ConnectModal(this.app,file,this,id);this.connectModal.open();}catch(e){new Notice(e.message);}}});
   this.addCommand({id:'import-ridi-notes',name:'리디 독서노트 JSON 가져오기',callback:()=>{const file=active();if(file)new ImportModal(this.app,file).open();}});
   this.addCommand({id:'connect-ridi-notes',name:'리디 확장 프로그램에서 가져오기',callback:()=>{const file=active();if(file){if(this.connectModal)this.connectModal.close();this.connectModal=new ConnectModal(this.app,file,this);this.connectModal.open();}}});
  }
- onunload(){for(const b of this.activeBridges)b.close();this.activeBridges.clear();}
+ onunload(){if(this.batchModal){this.batchModal.cancelled=true;this.batchModal.close();}for(const b of this.activeBridges)b.close();this.activeBridges.clear();}
 };

@@ -1,0 +1,5 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+function item(n){return {id:'annotation_'+n,innerText:`문장 ${n}\n2025.11.25.\n독서노트 관리`};}
+async function run(incorrect=false){let items=[item(1)], clicks=0;const more={innerText:'1 개 더보기',click(){clicks++;items.push(item(2));}};const section={querySelector(q){if(q==='h3')return {innerText:'책'};if(q.startsWith('li'))return items[0]},querySelectorAll(q){if(q==='button')return [{innerText:incorrect?'전체 3':'전체 2'},...(items.length===1?[more]:[])];if(q.startsWith('li'))return items;throw Error(q)}};
+ const ctx={document:{querySelector:()=>section},location:{pathname:'/reading-note/detail/123',origin:'https://ridibooks.com'},Date,setTimeout};const result=await vm.runInNewContext(fs.readFileSync(__dirname+'/collector.js','utf8'),ctx);return {result,clicks};}
+(async()=>{const x=await run();assert.equal(x.clicks,1);assert.equal(x.result.items.length,2);assert.equal(x.result.bookId,'123');await assert.rejects(run(true),/다릅니다/);console.log('더보기 수집 및 전체 개수 검증 통과');})().catch(e=>{console.error(e);process.exitCode=1});

@@ -3,7 +3,7 @@ const crypto=require('node:crypto');
 function startBridge(onData,options={}){return new Promise((resolve,reject)=>{
  const token=options.token??crypto.randomBytes(24).toString('hex');if(!/^[0-9a-f]{48}$/.test(token)){reject(new Error('연결 코드가 올바르지 않습니다.'));return;}let closed=false;let timer;
  const server=http.createServer((req,res)=>{
-  res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Headers','content-type, x-ridi-token');res.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');
+  res.setHeader('Connection','close');res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Headers','content-type, x-ridi-token');res.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');
   if(req.method==='OPTIONS'){res.writeHead(204);res.end();return;}
   if(req.headers['x-ridi-token']!==token||closed){res.writeHead(403);res.end();return;}
   if(req.method==='GET'&&req.url==='/status'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({bookId:options.bookId??null}));return;}
