@@ -1,0 +1,5 @@
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');let handler;let messages=[];let pending;
+const chrome={tabs:{onUpdated:{addListener:f=>handler=f}},storage:{local:{get:async()=>({ridiPairCode:'43177:'+'a'.repeat(48)})}},scripting:{executeScript:async()=>[{result:{bookId:'123',items:[{id:'annotation_1'}]}}]}};
+const fetch=async(url,opts)=>{messages.push({url,opts});return url.endsWith('/status')?{ok:true,json:async()=>({bookId:'123'})}:{ok:true}};
+vm.runInNewContext(fs.readFileSync(__dirname+'/background.js','utf8'),{chrome,fetch,URL,Set,console});
+(async()=>{handler(1,{status:'complete'},{url:'https://ridibooks.com/reading-note/detail/123'});await new Promise(r=>setTimeout(r,30));assert.equal(messages.length,2);assert.ok(messages[1].url.endsWith('/import'));assert.equal(JSON.parse(messages[1].opts.body).bookId,'123');messages=[];handler(2,{status:'complete'},{url:'https://ridibooks.com/reading-note/detail/456'});await new Promise(r=>setTimeout(r,30));assert.equal(messages.length,1);console.log('확장 자동 전송과 다른 책 차단 검사 통과')})().catch(e=>{console.error(e);process.exitCode=1});

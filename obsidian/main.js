@@ -22,16 +22,20 @@ const crypto=require('node:crypto');
 function startBridge(onData,options={}){return new Promise((resolve,reject)=>{
  const token=options.token??crypto.randomBytes(24).toString('hex');if(!/^[0-9a-f]{48}$/.test(token)){reject(new Error('연결 코드가 올바르지 않습니다.'));return;}let closed=false;let timer;
  const server=http.createServer((req,res)=>{
-  res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Headers','content-type, x-ridi-token');res.setHeader('Access-Control-Allow-Methods','POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Headers','content-type, x-ridi-token');res.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');
   if(req.method==='OPTIONS'){res.writeHead(204);res.end();return;}
-  if(req.method!=='POST'||req.url!=='/import'){res.writeHead(404);res.end();return;}
   if(req.headers['x-ridi-token']!==token||closed){res.writeHead(403);res.end();return;}
+  if(req.method==='GET'&&req.url==='/status'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({bookId:options.bookId??null}));return;}
+  if(req.method!=='POST'||req.url!=='/import'){res.writeHead(404);res.end();return;}
   let chunks=[],size=0;req.on('data',c=>{size+=c.length;if(size>10485760){res.writeHead(413);res.end();req.destroy();}else chunks.push(c);});
-  req.on('end',()=>{if(res.writableEnded)return;try{const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(onData(data)!==true)throw Error('invalid');res.writeHead(200,{'Content-Type':'application/json'});res.end('{"ok":true}');close();}catch(e){res.writeHead(400);res.end('invalid data');}});
+  req.on('end',()=>{if(res.writableEnded)return;try{const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(options.bookId&&String(data.bookId)!==options.bookId)throw Error('wrong book');if(onData(data)!==true)throw Error('invalid');res.writeHead(200,{'Content-Type':'application/json'});res.end('{"ok":true}');close();}catch(e){res.writeHead(400);res.end('invalid data');}});
  });
  function close(){if(!closed){closed=true;clearTimeout(timer);server.close();}}
  server.once('error',reject);server.listen(options.port??0,'127.0.0.1',()=>{timer=setTimeout(close,options.timeoutMs??120000);resolve({token,port:server.address().port,close,isClosed:()=>closed});});
 });}
+
+
+function getBookId(text){const ids=new Set([...text.matchAll(/<!-- ridi:(\d+):annotation_\d+ -->/g)].map(m=>m[1]));if(ids.size===0)throw Error('노트에서 리디 책 ID를 찾지 못했습니다. 먼저 기존 방식으로 한 번 가져오세요.');if(ids.size!==1)throw Error('노트에 리디 책 ID가 여러 개 있습니다. 자동 가져오기를 중단합니다.');return [...ids][0];}
 
 
 const {Plugin,Modal,Notice,MarkdownView,TFile}=require('obsidian');
@@ -58,18 +62,20 @@ class ImportModal extends Modal {
  onClose(){this.sequence++;this.contentEl.empty();}
 }
 class ConnectModal extends Modal {
- constructor(app,file,plugin){super(app);this.file=file;this.plugin=plugin;this.bridge=null;this.closed=false;}
+ constructor(app,file,plugin,bookId=null){super(app);this.file=file;this.plugin=plugin;this.bookId=bookId;this.bridge=null;this.closed=false;}
  async onOpen(){const root=this.contentEl;root.empty();root.createEl('h2',{text:'리디 확장 프로그램 연결'});root.createEl('p',{text:`대상 노트: ${this.file.path}`});const status=root.createEl('p',{text:'연결을 준비하고 있습니다...'});
- try{const bridge=await startBridge(data=>{try{merge('',data);}catch{return false;}if(this.closed)return false;setTimeout(()=>this.app.workspace.trigger('ridi-bridge-received',this.file,data),0);return true;},{port:43177,token:this.plugin.pairToken});
+ try{const bridge=await startBridge(data=>{try{merge('',data);}catch{return false;}if(this.closed)return false;setTimeout(()=>this.app.workspace.trigger('ridi-bridge-received',this.file,data),0);return true;},{port:43177,token:this.plugin.pairToken,bookId:this.bookId});
   if(this.closed){bridge.close();return;}this.bridge=bridge;this.plugin.activeBridges.add(bridge);status.textContent='처음 연결할 때만 아래 코드를 확장 프로그램에 입력하세요. 이미 연결했다면 확장에서 바로 보내면 됩니다. 연결은 2분 동안 열립니다.';
   const code=root.createEl('input',{type:'text'});code.value=`${bridge.port}:${bridge.token}`;code.readOnly=true;code.style.width='100%';
   const copy=root.createEl('button',{text:'연결 코드 복사'});copy.onclick=async()=>{try{await navigator.clipboard.writeText(code.value);new Notice('연결 코드를 복사했습니다.');}catch{code.focus();code.select();new Notice('코드를 직접 복사해 주세요.');}};
+  if(this.bookId){status.textContent='리디 페이지를 열어 독서노트를 자동으로 가져옵니다. 연결이 처음이면 기존 가져오기 명령으로 확장을 먼저 연결하세요.';await require('electron').shell.openExternal(`https://ridibooks.com/reading-note/detail/${this.bookId}`);}
  }catch(e){status.textContent='연결을 열 수 없습니다: '+e.message;}}
  onClose(){this.closed=true;if(this.bridge){this.bridge.close();this.plugin.activeBridges.delete(this.bridge);}this.contentEl.empty();}
 }
 module.exports=class RidiImportPlugin extends Plugin {
  async onload(){const settings=await this.loadData()||{};this.pairToken=typeof settings.pairToken==='string'&&/^[0-9a-f]{48}$/.test(settings.pairToken)?settings.pairToken:crypto.randomBytes(24).toString('hex');if(settings.pairToken!==this.pairToken)await this.saveData({...settings,pairToken:this.pairToken});this.activeBridges=new Set();this.registerEvent(this.app.workspace.on('ridi-bridge-received',(file,data)=>{if(this.connectModal)this.connectModal.close();for(const b of this.activeBridges)b.close();this.activeBridges.clear();new ImportModal(this.app,file,data).open();}));
   const active=()=>{const view=this.app.workspace.getActiveViewOfType(MarkdownView);const file=view&&view.file;if(!(file instanceof TFile)){new Notice('대상 책 노트를 먼저 열어 주세요.');return null;}return file;};
+  this.addCommand({id:'automatic-ridi-notes',name:'현재 책의 리디 독서노트 자동 가져오기',callback:async()=>{const file=active();if(!file)return;try{const id=getBookId(await this.app.vault.read(file));if(this.connectModal)this.connectModal.close();this.connectModal=new ConnectModal(this.app,file,this,id);this.connectModal.open();}catch(e){new Notice(e.message);}}});
   this.addCommand({id:'import-ridi-notes',name:'리디 독서노트 JSON 가져오기',callback:()=>{const file=active();if(file)new ImportModal(this.app,file).open();}});
   this.addCommand({id:'connect-ridi-notes',name:'리디 확장 프로그램에서 가져오기',callback:()=>{const file=active();if(file){if(this.connectModal)this.connectModal.close();this.connectModal=new ConnectModal(this.app,file,this);this.connectModal.open();}}});
  }
