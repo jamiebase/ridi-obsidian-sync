@@ -1,7 +1,7 @@
 const http=require('node:http');
 const crypto=require('node:crypto');
 function startBridge(onData,options={}){return new Promise((resolve,reject)=>{
- const token=crypto.randomBytes(24).toString('hex');let closed=false;let timer;
+ const token=options.token??crypto.randomBytes(24).toString('hex');if(!/^[0-9a-f]{48}$/.test(token)){reject(new Error('연결 코드가 올바르지 않습니다.'));return;}let closed=false;let timer;
  const server=http.createServer((req,res)=>{
   res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Headers','content-type, x-ridi-token');res.setHeader('Access-Control-Allow-Methods','POST, OPTIONS');
   if(req.method==='OPTIONS'){res.writeHead(204);res.end();return;}

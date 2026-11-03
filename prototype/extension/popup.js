@@ -87,6 +87,7 @@ async function collect(send) {
       const [port, token] = code.split(":");
       const response = await fetch(`http://127.0.0.1:${port}/import`, {method:"POST",headers:{"Content-Type":"application/json","X-Ridi-Token":token},body:JSON.stringify(data)});
       if (!response.ok) throw Error("전송이 거부됐습니다. 옵시디언에서 새 연결 코드를 받아 주세요.");
+      await chrome.storage.local.set({ridiPairCode:code});
       status.textContent = `${data.title}: ${data.items.length}개를 보냈습니다. 옵시디언 미리보기를 확인하세요.`;
       return;
     }
@@ -106,3 +107,8 @@ async function collect(send) {
 }
 document.getElementById('go').addEventListener('click',()=>collect(true));
 document.getElementById('download').addEventListener('click',()=>collect(false));
+
+chrome.storage.local.get('ridiPairCode').then(({ridiPairCode}) => {
+  const field = document.getElementById('code');
+  if (ridiPairCode && !field.value) field.value = ridiPairCode;
+}).catch(() => {});
