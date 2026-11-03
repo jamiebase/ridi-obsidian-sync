@@ -1,0 +1,34 @@
+const {Plugin,Modal,Notice,MarkdownView,TFile}=require('obsidian');
+class ImportModal extends Modal {
+ constructor(app,file){super(app);this.file=file;this.data=null;this.snapshot=null;this.result=null;this.busy=false;}
+ onOpen(){
+  const root=this.contentEl; root.empty(); root.createEl('h2',{text:'리디 독서노트 가져오기'});
+  root.createEl('p',{text:`대상 노트: ${this.file.path}`});
+  root.createEl('p',{text:'리디에서 내보낸 JSON 파일을 선택하세요. 책 제목과 대상 노트를 확인한 뒤 저장할 수 있습니다.'});
+  const input=root.createEl('input',{type:'file',attr:{accept:'.json,application/json'}});
+  const message=root.createEl('p'); const pre=root.createEl('pre'); pre.style.whiteSpace='pre-wrap'; pre.style.maxHeight='320px'; pre.style.overflow='auto';
+  const apply=root.createEl('button',{text:'노트에 반영'}); apply.disabled=true;
+  input.addEventListener('change',async()=>{try{
+   apply.disabled=true;this.result=null;pre.textContent=''; message.textContent='';
+   const selected=input.files && input.files[0]; if(!selected)return;
+   if(selected.size>10*1024*1024)throw Error('JSON 파일이 너무 큽니다.');
+   const data=JSON.parse(await selected.text()); const snapshot=await this.app.vault.read(this.file); const result=merge(snapshot,data);
+   this.data=data;this.snapshot=snapshot;this.result=result;
+   message.textContent=`리디 책: ${data.title} · 새 항목 ${result.added}개 · 기존 항목 ${result.skipped}개. 대상 노트가 맞는지 확인하세요.`;
+   pre.textContent=result.text; apply.disabled=result.added===0;
+  }catch(e){message.textContent='미리보기 실패: '+e.message;}});
+  apply.addEventListener('click',async()=>{if(this.busy||!this.result)return;this.busy=true;apply.disabled=true;try{
+   let changed=false;
+   await this.app.vault.process(this.file,current=>{if(current!==this.snapshot)throw Error('미리보기 이후 노트가 변경되었습니다. JSON을 다시 선택해 확인하세요.');changed=true;return this.result.text;});
+   if(changed){new Notice(`리디 독서노트 ${this.result.added}개를 추가했습니다.`);this.close();}
+  }catch(e){message.textContent='저장 실패: '+e.message;}finally{this.busy=false;}});
+ }
+ onClose(){this.contentEl.empty();}
+}
+module.exports=class RidiImportPlugin extends Plugin {
+ onload(){this.addCommand({id:'import-ridi-notes',name:'리디 독서노트 JSON 가져오기',callback:()=>{
+  const view=this.app.workspace.getActiveViewOfType(MarkdownView);const file=view&&view.file;
+  if(!(file instanceof TFile)){new Notice('대상 책 노트를 먼저 열어 주세요.');return;}
+  new ImportModal(this.app,file).open();
+ }});}
+};

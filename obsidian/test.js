@@ -1,0 +1,11 @@
+const assert=require('node:assert/strict');
+const {merge}=require('./merge');
+const data={version:1,title:'책',bookId:'123',items:[{id:'annotation_1',text:'내용',date:'2025.11.25.',memo:'생각'}]};
+let first=merge('# 책\n\n## 독서노트\n\n내 글\n\n## 감상\n\n기존 감상\n',data);
+assert.equal(first.added,1);assert.ok(first.text.includes('내 글'));assert.ok(first.text.indexOf('annotation_1')<first.text.indexOf('## 감상'));assert.ok(first.text.includes('> 메모: 생각'));
+let edited=first.text.replace('> 내용','> 직접 수정');let again=merge(edited,data);assert.equal(again.added,0);assert.equal(again.text,edited);
+assert.throws(()=>merge('## 독서노트\n## 독서노트\n',data),/여러 개/);
+assert.throws(()=>merge('',{...data,items:[...data.items,...data.items]}),/중복/);
+assert.throws(()=>merge('<!-- ridi:123:annotation_1 -->\n<!-- ridi:123:annotation_1 -->',data),/중복/);
+assert.ok(merge('# 책\n',data).text.includes('## 독서노트'));
+console.log('6개 가져오기 안전성 검사 통과');
