@@ -1,0 +1,5 @@
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+class BatchModal{constructor(app){this.app=app;this.cancelled=false;}}
+const context={BatchModal,readFrontmatter:text=>{if(text.includes('invalid'))throw Error('invalid');return {ridi_book_id:'123'};}};
+vm.createContext(context);vm.runInContext(fs.readFileSync(__dirname+'/browser-batch-ui.js','utf8')+'\nthis.BrowserBatchModal=BrowserBatchModal;',context);
+(async()=>{const files=[{path:'템플릿.md',text:'---\ninvalid\n---\n'},{path:'책.md',text:'---\nridi_book_id: "123"\n---\n'}];const app={vault:{getMarkdownFiles:()=>files,read:async file=>file.text}};const modal=new context.BrowserBatchModal(app,{},['123']);const rows=await modal.scan();assert.equal(rows.length,1);assert.equal(rows[0].file.path,'책.md');files.push({path:'의심 노트.md',text:'---\nridi_book_id: invalid\n---'});await assert.rejects(()=>modal.scan(),/의심 노트/);console.log('관계없는 잘못된 속성은 건너뛰고 책 ID가 있는 오류는 차단');})().catch(e=>{console.error(e);process.exitCode=1;});
